@@ -60,8 +60,8 @@ WORKDIR /data
 
 # Expose ports
 # P2P
-EXPOSE 30303/tcp
-EXPOSE 30303/udp
+EXPOSE 8333/tcp
+EXPOSE 8333/udp
 # HTTP RPC
 EXPOSE 8545/tcp
 # WebSocket RPC  

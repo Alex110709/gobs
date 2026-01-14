@@ -69,7 +69,7 @@ func DefaultConfig() Config {
 		WSModules:        []string{"eth", "net", "web3", "obs"},
 		P2P: p2p.Config{
 			MaxPeers:    50,
-			ListenAddr:  ":30303",
+			ListenAddr:  ":8333",
 			NAT:         nil,
 		},
 	}

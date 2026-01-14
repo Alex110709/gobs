@@ -91,7 +91,7 @@ var (
 	p2pPortFlag = &cli.IntFlag{
 		Name:  "port",
 		Usage: "Network listening port",
-		Value: 30303,
+		Value: 8333,
 	}
 	maxPeersFlag = &cli.IntFlag{
 		Name:  "maxpeers",

@@ -23,6 +23,7 @@ import (
 
 	"github.com/obsidian-chain/obsidian/eth/backend"
 	"github.com/obsidian-chain/obsidian/node"
+	obsp2p "github.com/obsidian-chain/obsidian/p2p"
 	obsparams "github.com/obsidian-chain/obsidian/params"
 	obsrpc "github.com/obsidian-chain/obsidian/rpc"
 	"github.com/obsidian-chain/obsidian/stealth"
@@ -216,6 +217,18 @@ func runNode(ctx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create backend: %v", err)
 	}
+
+	// Create P2P handler for block broadcasting
+	p2pHandler := obsp2p.NewHandler(
+		obsparams.ObsidianMainnetNetworkID,
+		b, // Pass backend as P2P backend interface
+	)
+
+	// Register P2P protocol with node
+	nodeConfig.P2P.Protocols = append(nodeConfig.P2P.Protocols, p2pHandler.Protocol())
+
+	// Set P2P handler in backend for broadcasting
+	b.SetP2PHandler(p2pHandler)
 
 	// Register RPC APIs
 	apis := obsrpc.GetAPIs(b)

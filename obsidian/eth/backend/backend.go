@@ -28,6 +28,12 @@ var (
 	ErrNotFound = errors.New("not found")
 )
 
+// BlockBroadcaster interface for P2P block broadcasting
+type BlockBroadcaster interface {
+	BroadcastBlock(block *obstypes.ObsidianBlock)
+	PeerCount() int
+}
+
 // Backend implements the full Obsidian backend
 type Backend struct {
 	config *Config
@@ -47,6 +53,9 @@ type Backend struct {
 
 	// Transaction data
 	txLookup map[common.Hash]*txLookupEntry
+
+	// P2P
+	p2pHandler BlockBroadcaster
 
 	// Events
 	chainHeadFeed     event.Feed
@@ -425,13 +434,24 @@ func (b *Backend) InsertBlock(block *obstypes.ObsidianBlock) error {
 	// Notify subscribers
 	b.chainHeadFeed.Send(miner.ChainHeadEvent{Block: block})
 
-	// Broadcast to peers
+	// Broadcast to peers via P2P handler
+	if b.p2pHandler != nil {
+		b.p2pHandler.BroadcastBlock(block)
+	}
+
+	// Also send to minedBlockFeed for other subscribers
 	b.minedBlockFeed.Send(MinedBlockEvent{Block: block})
 
-	log.Info("New block inserted and broadcasted",
+	log.Info("Block inserted",
 		"number", block.NumberU64(),
 		"hash", hash.Hex(),
 		"txs", len(block.Transactions()),
+		"peers", func() int {
+			if b.p2pHandler != nil {
+				return b.p2pHandler.PeerCount()
+			}
+			return 0
+		}(),
 	)
 
 	return nil
@@ -465,4 +485,86 @@ func (b *Backend) GetTxPool() *txpool.TxPool {
 // GetState returns the state database
 func (b *Backend) GetState() *obsstate.StateDB {
 	return b.state
+}
+
+// SetP2PHandler sets the P2P handler for block broadcasting
+func (b *Backend) SetP2PHandler(handler BlockBroadcaster) {
+	b.p2pHandler = handler
+}
+
+// GenesisHash returns the genesis block hash
+func (b *Backend) GenesisHash() common.Hash {
+	if b.genesisBlock != nil {
+		return b.genesisBlock.Hash()
+	}
+	return common.Hash{}
+}
+
+// GetBlockByHash returns a block by hash
+func (b *Backend) GetBlockByHash(hash common.Hash) *obstypes.ObsidianBlock {
+	b.chainMu.RLock()
+	defer b.chainMu.RUnlock()
+	return b.blocks[hash]
+}
+
+// GetBlockByNumber returns a block by number
+func (b *Backend) GetBlockByNumber(number uint64) *obstypes.ObsidianBlock {
+	b.chainMu.RLock()
+	defer b.chainMu.RUnlock()
+	return b.blocksByNum[number]
+}
+
+// GetTD returns the total difficulty for a block
+func (b *Backend) GetTD(hash common.Hash) *big.Int {
+	b.chainMu.RLock()
+	defer b.chainMu.RUnlock()
+	
+	block, ok := b.blocks[hash]
+	if !ok {
+		return nil
+	}
+	
+	// Calculate total difficulty by summing all difficulties
+	td := big.NewInt(0)
+	for num := uint64(0); num <= block.NumberU64(); num++ {
+		blk := b.blocksByNum[num]
+		if blk != nil {
+			td.Add(td, blk.Difficulty())
+		}
+	}
+	return td
+}
+
+// HasBlock checks if a block exists
+func (b *Backend) HasBlock(hash common.Hash) bool {
+	b.chainMu.RLock()
+	defer b.chainMu.RUnlock()
+	_, exists := b.blocks[hash]
+	return exists
+}
+
+// AddRemoteTxs adds transactions from remote peers
+func (b *Backend) AddRemoteTxs(txs []*obstypes.StealthTransaction) []error {
+	errs := make([]error, len(txs))
+	for i, tx := range txs {
+		errs[i] = b.txPool.Add(tx, false) // false = remote (not local)
+	}
+	return errs
+}
+
+// PendingTxs returns pending transactions
+func (b *Backend) PendingTxs() []*obstypes.StealthTransaction {
+	pending := b.txPool.Pending(true)
+	var txs []*obstypes.StealthTransaction
+	for _, list := range pending {
+		txs = append(txs, list...)
+	}
+	return txs
+}
+
+// BroadcastBlock broadcasts a block to peers (implements BlockBroadcaster)
+func (b *Backend) BroadcastBlock(block *obstypes.ObsidianBlock) {
+	if b.p2pHandler != nil {
+		b.p2pHandler.BroadcastBlock(block)
+	}
 }

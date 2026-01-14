@@ -4,6 +4,7 @@
 package node
 
 import (
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -235,9 +237,17 @@ func (n *Node) startP2P() error {
 		return nil // P2P disabled
 	}
 
+	// Load or generate node key
+	keyFile := filepath.Join(n.config.DataDir, "nodekey")
+	key, err := loadOrGenerateKey(keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to load/generate node key: %v", err)
+	}
+
 	serverConfig := n.config.P2P
 	serverConfig.Name = n.config.Name
 	serverConfig.Logger = n.log
+	serverConfig.PrivateKey = key
 
 	server := &p2p.Server{Config: serverConfig}
 	if err := server.Start(); err != nil {
@@ -248,8 +258,34 @@ func (n *Node) startP2P() error {
 	n.server = server
 	n.serverMux.Unlock()
 
-	n.log.Info("P2P server started", "self", server.Self())
+	n.log.Info("P2P server started", "self", server.Self(), "enode", server.Self().URLv4())
 	return nil
+}
+
+// loadOrGenerateKey loads a node key from file or generates a new one
+func loadOrGenerateKey(keyFile string) (*ecdsa.PrivateKey, error) {
+	// Try to load existing key
+	if key, err := crypto.LoadECDSA(keyFile); err == nil {
+		return key, nil
+	}
+
+	// Generate new key
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(keyFile), 0700); err != nil {
+		return nil, err
+	}
+
+	// Save key to file
+	if err := crypto.SaveECDSA(keyFile, key); err != nil {
+		return nil, err
+	}
+
+	return key, nil
 }
 
 // stopP2P stops the P2P server

@@ -16,7 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/obsidian-chain/obsidian/consensus/obsidianash"
-	"github.com/obsidian-chain/obsidian/core/state"
+	obsstate "github.com/obsidian-chain/obsidian/core/state"
 	obstypes "github.com/obsidian-chain/obsidian/core/types"
 	"github.com/obsidian-chain/obsidian/core/txpool"
 	"github.com/obsidian-chain/obsidian/miner"
@@ -36,7 +36,7 @@ type Backend struct {
 	engine  *obsidianash.ObsidianAsh
 	txPool  *txpool.TxPool
 	miner   *miner.Miner
-	state   *state.StateDB
+	state   *obsstate.StateDB
 
 	// Blockchain data
 	chainMu      sync.RWMutex
@@ -94,7 +94,7 @@ type txLookupEntry struct {
 // DefaultConfig returns the default backend configuration
 func DefaultConfig() *Config {
 	return &Config{
-		ChainID:         big.NewInt(7700),
+		ChainID:         big.NewInt(1719),
 		MinerConfig:     miner.DefaultConfig(),
 		TxPoolConfig:    txpool.DefaultConfig(),
 		ConsensusConfig: params.DefaultObsidianashConfig(),
@@ -113,10 +113,10 @@ func New(config *Config) (*Backend, error) {
 	}
 
 	// Create consensus engine
-	engine := obsidianash.New(config.ConsensusConfig, nil)
+	engine := obsidianash.New(config.ConsensusConfig)
 
 	// Create state
-	stateDB := state.NewMemoryStateDB()
+	stateDB := obsstate.NewMemoryStateDB()
 
 	// Create backend
 	b := &Backend{
@@ -224,14 +224,9 @@ func (b *Backend) GetBlock(hash common.Hash, number uint64) *obstypes.ObsidianBl
 }
 
 // StateAt returns a state database at a given root
-func (b *Backend) StateAt(root common.Hash) (txpool.StateDB, error) {
+func (b *Backend) StateAt(root common.Hash) (obsstate.StateDBInterface, error) {
 	// For simplicity, return current state
-	return &stateWrapper{b.state}, nil
-}
-
-// stateWrapper wraps our state to implement txpool.StateDB
-type stateWrapper struct {
-	*state.StateDB
+	return b.state, nil
 }
 
 // Implement Backend interface for miner
@@ -382,8 +377,13 @@ func (b *Backend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 }
 
 // EstimateGas estimates gas for a call
-func (b *Backend) EstimateGas(ctx context.Context, args interface{}) (uint64, error) {
-	return 21000, nil // Basic transfer gas
+func (b *Backend) EstimateGas(ctx context.Context, args obstypes.CallArgs) (uint64, error) {
+	// Basic gas estimation - 21000 for simple transfers
+	// Would be more complex for contract calls
+	if args.Data != nil && len(*args.Data) > 0 {
+		return 21000 + uint64(len(*args.Data))*68, nil
+	}
+	return 21000, nil
 }
 
 // StartMining starts the miner
@@ -449,6 +449,6 @@ func (b *Backend) GetTxPool() *txpool.TxPool {
 }
 
 // GetState returns the state database
-func (b *Backend) GetState() *state.StateDB {
+func (b *Backend) GetState() *obsstate.StateDB {
 	return b.state
 }

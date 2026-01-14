@@ -13,7 +13,7 @@ import (
 // Difficulty adjustment constants for 5-second block time
 const (
 	// targetBlockTime is the target time between blocks in seconds
-	targetBlockTime = 5
+	targetBlockTime = 2
 
 	// difficultyBoundDivisor is the bound divisor (2048)
 	// Right-shift by 11 is equivalent to dividing by 2048
@@ -27,7 +27,7 @@ const (
 )
 
 // CalcDifficulty calculates the difficulty for a new block based on
-// the target 5-second block time.
+// the target 2-second block time.
 //
 // Algorithm:
 //

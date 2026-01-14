@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Build artifacts
+obsidian/obsidian
+*.exe
+*.test
+*.out
+
+# Documentation
+*.md
+!README.md
+LICENSE
+
+# Local configs
+.env
+.env.*
+
+# Test data
+*_test.go
+testdata/
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Letta/Claude configs
+.letta
+.claude
+.claude-flow
+.swarm
+.skills
+
+# macOS
+.DS_Store
+*.plist
+
+# Windows  
+Thumbs.db
+desktop.ini
+
+# Go cache (if present)
+vendor/
+
+# Large go-ethereum files not needed for build
+go-ethereum/.git
+go-ethereum/build/
+go-ethereum/vendor/
+go-ethereum/tests/
+go-ethereum/testdata/

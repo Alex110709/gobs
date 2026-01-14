@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/obsidian-chain/obsidian/core/state"
 	obstypes "github.com/obsidian-chain/obsidian/core/types"
 )
 
@@ -80,13 +81,7 @@ const (
 type BlockChain interface {
 	CurrentBlock() *obstypes.ObsidianHeader
 	GetBlock(hash common.Hash, number uint64) *obstypes.ObsidianBlock
-	StateAt(root common.Hash) (StateDB, error)
-}
-
-// StateDB represents the state database interface
-type StateDB interface {
-	GetNonce(addr common.Address) uint64
-	GetBalance(addr common.Address) *big.Int
+	StateAt(root common.Hash) (state.StateDBInterface, error)
 }
 
 // TxPool contains all the pending transactions

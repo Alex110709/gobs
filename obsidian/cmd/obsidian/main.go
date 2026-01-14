@@ -9,12 +9,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/log"
+	ethrpc "github.com/ethereum/go-ethereum/rpc"
 	"github.com/urfave/cli/v2"
 
+	"github.com/obsidian-chain/obsidian/eth/backend"
+	"github.com/obsidian-chain/obsidian/node"
 	obsparams "github.com/obsidian-chain/obsidian/params"
+	obsrpc "github.com/obsidian-chain/obsidian/rpc"
 	"github.com/obsidian-chain/obsidian/stealth"
 )
 
@@ -24,6 +31,85 @@ var (
 	gitDate   = ""
 )
 
+// Flags
+var (
+	dataDirFlag = &cli.StringFlag{
+		Name:    "datadir",
+		Usage:   "Data directory for the databases and keystore",
+		Value:   node.DefaultDataDir(),
+		EnvVars: []string{"OBSIDIAN_DATADIR"},
+	}
+	httpEnabledFlag = &cli.BoolFlag{
+		Name:  "http",
+		Usage: "Enable the HTTP-RPC server",
+		Value: true,
+	}
+	httpHostFlag = &cli.StringFlag{
+		Name:  "http.addr",
+		Usage: "HTTP-RPC server listening interface",
+		Value: "localhost",
+	}
+	httpPortFlag = &cli.IntFlag{
+		Name:  "http.port",
+		Usage: "HTTP-RPC server listening port",
+		Value: 8545,
+	}
+	httpCorsFlag = &cli.StringFlag{
+		Name:  "http.corsdomain",
+		Usage: "Comma separated list of domains from which to accept cross origin requests",
+		Value: "*",
+	}
+	httpApiFlag = &cli.StringFlag{
+		Name:  "http.api",
+		Usage: "APIs offered over the HTTP-RPC interface",
+		Value: "eth,net,web3,obs,miner",
+	}
+	wsEnabledFlag = &cli.BoolFlag{
+		Name:  "ws",
+		Usage: "Enable the WS-RPC server",
+		Value: false,
+	}
+	wsHostFlag = &cli.StringFlag{
+		Name:  "ws.addr",
+		Usage: "WS-RPC server listening interface",
+		Value: "localhost",
+	}
+	wsPortFlag = &cli.IntFlag{
+		Name:  "ws.port",
+		Usage: "WS-RPC server listening port",
+		Value: 8546,
+	}
+	minerEnabledFlag = &cli.BoolFlag{
+		Name:  "mine",
+		Usage: "Enable mining",
+		Value: false,
+	}
+	minerCoinbaseFlag = &cli.StringFlag{
+		Name:  "miner.etherbase",
+		Usage: "Public address for block mining rewards",
+	}
+	p2pPortFlag = &cli.IntFlag{
+		Name:  "port",
+		Usage: "Network listening port",
+		Value: 30303,
+	}
+	maxPeersFlag = &cli.IntFlag{
+		Name:  "maxpeers",
+		Usage: "Maximum number of network peers",
+		Value: 50,
+	}
+	networkIdFlag = &cli.Uint64Flag{
+		Name:  "networkid",
+		Usage: "Network identifier",
+		Value: obsparams.ObsidianMainnetNetworkID,
+	}
+	logLevelFlag = &cli.IntFlag{
+		Name:  "verbosity",
+		Usage: "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail",
+		Value: 3,
+	}
+)
+
 func main() {
 	app := &cli.App{
 		Name:                 "obsidian",
@@ -31,9 +117,16 @@ func main() {
 		Version:              obsparams.VersionWithMeta,
 		EnableBashCompletion: true,
 		Commands: []*cli.Command{
+			runCommand,
 			initCommand,
 			versionCommand,
 			stealthCommand,
+			accountCommand,
+			consoleCommand,
+		},
+		Flags: []cli.Flag{
+			dataDirFlag,
+			logLevelFlag,
 		},
 	}
 
@@ -43,17 +136,113 @@ func main() {
 	}
 }
 
+// runCommand starts the Obsidian node
+var runCommand = &cli.Command{
+	Name:  "run",
+	Usage: "Start the Obsidian node",
+	Flags: []cli.Flag{
+		dataDirFlag,
+		httpEnabledFlag,
+		httpHostFlag,
+		httpPortFlag,
+		httpCorsFlag,
+		httpApiFlag,
+		wsEnabledFlag,
+		wsHostFlag,
+		wsPortFlag,
+		minerEnabledFlag,
+		minerCoinbaseFlag,
+		p2pPortFlag,
+		maxPeersFlag,
+		networkIdFlag,
+		logLevelFlag,
+	},
+	Action: runNode,
+}
+
+func runNode(ctx *cli.Context) error {
+	// Setup logging
+	logLevel := log.FromLegacyLevel(ctx.Int(logLevelFlag.Name))
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, logLevel, true)))
+
+	log.Info("Starting Obsidian node",
+		"version", obsparams.VersionWithMeta,
+		"chainId", obsparams.ObsidianMainnetNetworkID,
+	)
+
+	// Create node config
+	nodeConfig := node.DefaultConfig()
+	nodeConfig.DataDir = ctx.String(dataDirFlag.Name)
+	nodeConfig.HTTPHost = ctx.String(httpHostFlag.Name)
+	nodeConfig.HTTPPort = ctx.Int(httpPortFlag.Name)
+	nodeConfig.HTTPModules = []string{"eth", "net", "web3", "obs", "miner"}
+	nodeConfig.WSHost = ctx.String(wsHostFlag.Name)
+	nodeConfig.WSPort = ctx.Int(wsPortFlag.Name)
+	nodeConfig.P2P.MaxPeers = ctx.Int(maxPeersFlag.Name)
+	nodeConfig.P2P.ListenAddr = fmt.Sprintf(":%d", ctx.Int(p2pPortFlag.Name))
+
+	// Create node
+	n, err := node.New(&nodeConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create node: %v", err)
+	}
+
+	// Create backend
+	backendConfig := backend.DefaultConfig()
+	b, err := backend.New(backendConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create backend: %v", err)
+	}
+
+	// Register RPC APIs
+	apis := obsrpc.GetAPIs(b)
+	rpcAPIs := make([]ethrpc.API, len(apis))
+	for i, api := range apis {
+		rpcAPIs[i] = ethrpc.API{
+			Namespace: api.Namespace,
+			Service:   api.Service,
+		}
+	}
+	n.RegisterAPIs(rpcAPIs)
+
+	// Start node
+	if err := n.Start(); err != nil {
+		return fmt.Errorf("failed to start node: %v", err)
+	}
+
+	// Start mining if enabled
+	if ctx.Bool(minerEnabledFlag.Name) {
+		log.Info("Starting miner")
+		if err := b.StartMining(); err != nil {
+			log.Error("Failed to start miner", "error", err)
+		}
+	}
+
+	log.Info("Obsidian node started successfully",
+		"http", fmt.Sprintf("http://%s:%d", nodeConfig.HTTPHost, nodeConfig.HTTPPort),
+		"datadir", nodeConfig.DataDir,
+	)
+
+	// Wait for interrupt signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	log.Info("Shutting down...")
+	if err := n.Stop(); err != nil {
+		log.Error("Error stopping node", "error", err)
+	}
+
+	return nil
+}
+
 // initCommand initializes a new genesis block
 var initCommand = &cli.Command{
 	Name:      "init",
 	Usage:     "Bootstrap and initialize a new genesis block",
 	ArgsUsage: "<genesisPath>",
 	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:  "datadir",
-			Usage: "Data directory for the databases",
-			Value: "./obsidian-data",
-		},
+		dataDirFlag,
 	},
 	Action: func(ctx *cli.Context) error {
 		genesisPath := ctx.Args().First()
@@ -97,6 +286,8 @@ var versionCommand = &cli.Command{
 		fmt.Println("Architecture:", runtime.GOARCH)
 		fmt.Println("Go Version:", runtime.Version())
 		fmt.Println("Operating System:", runtime.GOOS)
+		fmt.Printf("Chain ID: %d (0x%x)\n", obsparams.ObsidianMainnetNetworkID, obsparams.ObsidianMainnetNetworkID)
+		fmt.Printf("Block Time: %s\n", obsparams.BlockTime)
 		return nil
 	},
 }
@@ -117,6 +308,70 @@ var stealthCommand = &cli.Command{
 			ArgsUsage: "<meta-address>",
 			Action:    stealthAddress,
 		},
+		{
+			Name:      "scan",
+			Usage:     "Scan for payments to your stealth addresses",
+			ArgsUsage: "<view-private-key>",
+			Action:    stealthScan,
+		},
+	},
+}
+
+// accountCommand manages accounts
+var accountCommand = &cli.Command{
+	Name:  "account",
+	Usage: "Manage accounts",
+	Subcommands: []*cli.Command{
+		{
+			Name:   "new",
+			Usage:  "Create a new account",
+			Action: accountNew,
+		},
+		{
+			Name:   "list",
+			Usage:  "List all accounts",
+			Action: accountList,
+		},
+	},
+}
+
+// consoleCommand attaches to a running node
+var consoleCommand = &cli.Command{
+	Name:  "console",
+	Usage: "Start an interactive JavaScript console (attach to running node)",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "attach",
+			Usage: "Endpoint to attach to",
+			Value: "http://localhost:8545",
+		},
+	},
+	Action: func(ctx *cli.Context) error {
+		endpoint := ctx.String("attach")
+		fmt.Printf("Connecting to %s...\n", endpoint)
+
+		client, err := ethrpc.Dial(endpoint)
+		if err != nil {
+			return fmt.Errorf("failed to connect to node: %v", err)
+		}
+		defer client.Close()
+
+		// Get chain ID to verify connection
+		var chainId string
+		if err := client.Call(&chainId, "eth_chainId"); err != nil {
+			return fmt.Errorf("failed to get chain ID: %v", err)
+		}
+
+		fmt.Println("Connected successfully!")
+		fmt.Printf("Chain ID: %s\n", chainId)
+		fmt.Println("\nAvailable RPC methods:")
+		fmt.Println("  eth_* - Ethereum compatible methods")
+		fmt.Println("  obs_* - Obsidian specific methods")
+		fmt.Println("  net_* - Network methods")
+		fmt.Println("  web3_* - Web3 methods")
+		fmt.Println("\nExample: curl -X POST -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"obs_getNetworkInfo\",\"params\":[],\"id\":1}' " + endpoint)
+
+		return nil
 	},
 }
 
@@ -172,5 +427,44 @@ func stealthAddress(ctx *cli.Context) error {
 	fmt.Println("Send funds to the Stealth Address.")
 	fmt.Println("Include the Ephemeral Pub Key in the transaction data.")
 
+	return nil
+}
+
+// stealthScan scans for stealth payments
+func stealthScan(ctx *cli.Context) error {
+	viewKey := ctx.Args().First()
+	if viewKey == "" {
+		return fmt.Errorf("must provide view private key")
+	}
+	fmt.Println("Scanning for stealth payments...")
+	fmt.Println("(This feature requires a running node with indexed transactions)")
+	return nil
+}
+
+// accountNew creates a new account
+func accountNew(ctx *cli.Context) error {
+	keyPair, err := stealth.GenerateStealthKeyPair()
+	if err != nil {
+		return fmt.Errorf("failed to generate key pair: %v", err)
+	}
+
+	// Use spend key as the main account key
+	privateKey := keyPair.SpendPrivateKey
+
+	fmt.Println("=== New Account Created ===")
+	fmt.Println()
+	fmt.Printf("Address: 0x%x\n", privateKey.PublicKey.X.Bytes()[:20])
+	fmt.Printf("Private Key: %s\n", hex.EncodeToString(privateKey.D.Bytes()))
+	fmt.Println()
+	fmt.Println("IMPORTANT: Save your private key securely!")
+
+	return nil
+}
+
+// accountList lists all accounts
+func accountList(ctx *cli.Context) error {
+	dataDir := ctx.String(dataDirFlag.Name)
+	fmt.Printf("Keystore directory: %s/keystore\n", dataDir)
+	fmt.Println("(Account listing from keystore not yet implemented)")
 	return nil
 }

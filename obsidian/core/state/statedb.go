@@ -407,3 +407,20 @@ type Log struct {
 	BlockHash   common.Hash
 	Index       uint
 }
+
+// StateDBInterface is the common interface for state database access
+// Used by both txpool and miner packages
+type StateDBInterface interface {
+	GetBalance(addr common.Address) *big.Int
+	GetNonce(addr common.Address) uint64
+	AddBalance(addr common.Address, amount *big.Int)
+	SubBalance(addr common.Address, amount *big.Int)
+	SetNonce(addr common.Address, nonce uint64)
+	GetCode(addr common.Address) []byte
+	SetCode(addr common.Address, code []byte)
+	CreateAccount(addr common.Address)
+	Exist(addr common.Address) bool
+	Finalise(deleteEmptyObjects bool)
+	IntermediateRoot(deleteEmptyObjects bool) common.Hash
+	Commit(deleteEmptyObjects bool) (common.Hash, error)
+}

@@ -49,15 +49,8 @@ type Backend interface {
 	EstimateGas(ctx context.Context, args CallArgs) (uint64, error)
 }
 
-// CallArgs represents the arguments to a call
-type CallArgs struct {
-	From     *common.Address `json:"from"`
-	To       *common.Address `json:"to"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"data"`
-}
+// CallArgs is an alias for the shared CallArgs type
+type CallArgs = obstypes.CallArgs
 
 // PublicEthereumAPI provides Ethereum-compatible RPC methods
 type PublicEthereumAPI struct {

@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/obsidian-chain/obsidian/consensus/obsidianash"
+	"github.com/obsidian-chain/obsidian/core/state"
 	obstypes "github.com/obsidian-chain/obsidian/core/types"
 	"github.com/obsidian-chain/obsidian/params"
 )
@@ -53,29 +54,13 @@ type Backend interface {
 	// Blockchain methods
 	CurrentBlock() *obstypes.ObsidianHeader
 	GetBlock(hash common.Hash, number uint64) *obstypes.ObsidianBlock
-	StateAt(root common.Hash) (StateDB, error)
+	StateAt(root common.Hash) (state.StateDBInterface, error)
 
 	// Transaction pool methods
 	PendingTransactions(enforceTips bool) map[common.Address][]*obstypes.StealthTransaction
 
 	// Event subscription
 	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
-}
-
-// StateDB is the interface for state access
-type StateDB interface {
-	GetBalance(addr common.Address) *big.Int
-	GetNonce(addr common.Address) uint64
-	AddBalance(addr common.Address, amount *big.Int)
-	SubBalance(addr common.Address, amount *big.Int)
-	SetNonce(addr common.Address, nonce uint64)
-	GetCode(addr common.Address) []byte
-	SetCode(addr common.Address, code []byte)
-	CreateAccount(addr common.Address)
-	Exist(addr common.Address) bool
-	Finalise(deleteEmptyObjects bool)
-	IntermediateRoot(deleteEmptyObjects bool) common.Hash
-	Commit(deleteEmptyObjects bool) (common.Hash, error)
 }
 
 // ChainHeadEvent is sent when a new block is added
@@ -122,7 +107,7 @@ type Work struct {
 	Header     *obstypes.ObsidianHeader
 	Txs        []*obstypes.StealthTransaction
 	Receipts   []*Receipt
-	State      StateDB
+	State      state.StateDBInterface
 	CreatedAt  time.Time
 }
 
@@ -429,8 +414,8 @@ func CalculateReward(blockNum uint64, config *params.ObsidianashConfig) *big.Int
 
 // calcDifficulty calculates the difficulty for a new block
 func calcDifficulty(time uint64, parent *obstypes.ObsidianHeader) *big.Int {
-	// Target block time: 5 seconds
-	const targetBlockTime = 5
+	// Target block time: 2 seconds
+	const targetBlockTime = 2
 	const difficultyBoundDivisor = 11
 	const minimumDifficulty = 131072
 

@@ -33,19 +33,19 @@ var VersionWithMeta = func() string {
 
 // Obsidian Protocol Constants
 const (
-	// BlockTime is the target time between blocks (5 seconds)
-	BlockTime = 5 * time.Second
+	// BlockTime is the target time between blocks (2 seconds)
+	BlockTime = 2 * time.Second
 
 	// BlockTimeSeconds is BlockTime in seconds for difficulty calculation
-	BlockTimeSeconds = 5
+	BlockTimeSeconds = 2
 
-	// HalvingInterval is the number of blocks between halvings (~2 years at 5s blocks)
-	// 2 years = 2 * 365.25 * 24 * 60 * 60 / 5 = 12,614,400 blocks
-	HalvingInterval uint64 = 12_614_400
+	// HalvingInterval is the number of blocks between halvings (~2 years at 2s blocks)
+	// 2 years = 2 * 365.25 * 24 * 60 * 60 / 2 = 31,536,000 blocks
+	HalvingInterval uint64 = 31_536_000
 
 	// ChromaticPhaseBlocks is the transition period for smooth halving (10% of halving interval)
 	// This creates a gradual reduction in rewards approaching and after each halving
-	ChromaticPhaseBlocks uint64 = 1_261_440
+	ChromaticPhaseBlocks uint64 = 3_153_600
 
 	// MaxHalvings is the maximum number of halvings before rewards become negligible
 	MaxHalvings = 64
@@ -76,8 +76,8 @@ var (
 
 // NetworkID constants
 const (
-	ObsidianMainnetNetworkID = 7700
-	ObsidianTestnetNetworkID = 7701
+	ObsidianMainnetNetworkID = 1719  // 0x6B7
+	ObsidianTestnetNetworkID = 1720  // 0x6B8
 )
 
 // Genesis block constants

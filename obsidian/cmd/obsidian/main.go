@@ -8,10 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/log"
@@ -108,6 +111,16 @@ var (
 		Usage: "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail",
 		Value: 3,
 	}
+	bootnodesFlag = &cli.StringFlag{
+		Name:  "bootnodes",
+		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: "140.238.7.194:8333,217.142.151.122:8333,157.151.219.199:8333,129.154.52.54:8333,152.69.229.203:8333",
+	}
+	noDiscoverFlag = &cli.BoolFlag{
+		Name:  "nodiscover",
+		Usage: "Disables the peer discovery mechanism",
+		Value: false,
+	}
 )
 
 func main() {
@@ -156,6 +169,8 @@ var runCommand = &cli.Command{
 		maxPeersFlag,
 		networkIdFlag,
 		logLevelFlag,
+		bootnodesFlag,
+		noDiscoverFlag,
 	},
 	Action: runNode,
 }
@@ -170,6 +185,13 @@ func runNode(ctx *cli.Context) error {
 		"chainId", obsparams.ObsidianMainnetNetworkID,
 	)
 
+	// Parse seed nodes
+	seedNodes := strings.Split(ctx.String(bootnodesFlag.Name), ",")
+	for i := range seedNodes {
+		seedNodes[i] = strings.TrimSpace(seedNodes[i])
+	}
+	log.Info("Seed nodes configured", "nodes", seedNodes)
+
 	// Create node config
 	nodeConfig := node.DefaultConfig()
 	nodeConfig.DataDir = ctx.String(dataDirFlag.Name)
@@ -180,6 +202,7 @@ func runNode(ctx *cli.Context) error {
 	nodeConfig.WSPort = ctx.Int(wsPortFlag.Name)
 	nodeConfig.P2P.MaxPeers = ctx.Int(maxPeersFlag.Name)
 	nodeConfig.P2P.ListenAddr = fmt.Sprintf(":%d", ctx.Int(p2pPortFlag.Name))
+	nodeConfig.P2P.NoDiscovery = ctx.Bool(noDiscoverFlag.Name)
 
 	// Create node
 	n, err := node.New(&nodeConfig)
@@ -222,6 +245,9 @@ func runNode(ctx *cli.Context) error {
 		"http", fmt.Sprintf("http://%s:%d", nodeConfig.HTTPHost, nodeConfig.HTTPPort),
 		"datadir", nodeConfig.DataDir,
 	)
+
+	// Connect to seed nodes in background
+	go connectToSeedNodes(seedNodes)
 
 	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
@@ -467,4 +493,31 @@ func accountList(ctx *cli.Context) error {
 	fmt.Printf("Keystore directory: %s/keystore\n", dataDir)
 	fmt.Println("(Account listing from keystore not yet implemented)")
 	return nil
+}
+
+// connectToSeedNodes attempts to connect to seed nodes
+func connectToSeedNodes(seedNodes []string) {
+	log.Info("Connecting to seed nodes...", "count", len(seedNodes))
+
+	for _, addr := range seedNodes {
+		if addr == "" {
+			continue
+		}
+
+		go func(nodeAddr string) {
+			// Retry connection with backoff
+			for i := 0; i < 3; i++ {
+				conn, err := net.DialTimeout("tcp", nodeAddr, 10*time.Second)
+				if err != nil {
+					log.Debug("Failed to connect to seed node", "addr", nodeAddr, "attempt", i+1, "error", err)
+					time.Sleep(time.Duration(i+1) * 5 * time.Second)
+					continue
+				}
+				conn.Close()
+				log.Info("Successfully connected to seed node", "addr", nodeAddr)
+				return
+			}
+			log.Warn("Could not connect to seed node after retries", "addr", nodeAddr)
+		}(addr)
+	}
 }

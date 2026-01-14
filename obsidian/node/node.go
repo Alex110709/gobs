@@ -54,6 +54,15 @@ type Config struct {
 	Logger log.Logger `toml:"-"`
 }
 
+// DefaultSeedNodes returns the default seed nodes for mainnet
+var DefaultSeedNodes = []string{
+	"140.238.7.194:8333",
+	"217.142.151.122:8333",
+	"157.151.219.199:8333",
+	"129.154.52.54:8333",
+	"152.69.229.203:8333",
+}
+
 // DefaultConfig returns the default node configuration
 func DefaultConfig() Config {
 	return Config{
@@ -68,9 +77,9 @@ func DefaultConfig() Config {
 		WSPort:           8546,
 		WSModules:        []string{"eth", "net", "web3", "obs"},
 		P2P: p2p.Config{
-			MaxPeers:    50,
-			ListenAddr:  ":8333",
-			NAT:         nil,
+			MaxPeers:   50,
+			ListenAddr: ":8333",
+			NAT:        nil,
 		},
 	}
 }

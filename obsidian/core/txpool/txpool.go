@@ -279,29 +279,90 @@ func (pool *TxPool) add(tx *obstypes.StealthTransaction, local bool) error {
 		return ErrAlreadyKnown
 	}
 
-	// Validate the transaction sender and nonce
+	// Validate the transaction sender via signature recovery
 	from, err := pool.signer.Sender(tx)
 	if err != nil {
 		return ErrInvalidSender
 	}
 
-	// Check gas price
-	if tx.GasPrice().Cmp(pool.gasPrice) < 0 {
+	// Get current state for balance/nonce checks
+	currentHead := pool.chain.CurrentBlock()
+	stateDB, err := pool.chain.StateAt(currentHead.Root)
+	if err != nil {
+		log.Error("Failed to get state for tx validation", "err", err)
+		return err
+	}
+
+	// Check nonce - must be >= current nonce
+	currentNonce := stateDB.GetNonce(from)
+	if tx.Nonce() < currentNonce {
+		return ErrNonceTooLow
+	}
+
+	// Check balance - must have enough for gas * price + value
+	balance := stateDB.GetBalance(from)
+	gasPrice := tx.GasPrice()
+	if gasPrice == nil {
+		gasPrice = big.NewInt(0)
+	}
+	cost := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(tx.Gas()))
+	if tx.Value() != nil {
+		cost.Add(cost, tx.Value())
+	}
+	if balance.Cmp(cost) < 0 {
+		return ErrInsufficientFunds
+	}
+
+	// Check gas limit against block gas limit
+	if tx.Gas() > currentHead.GasLimit {
+		return ErrGasLimit
+	}
+
+	// Check gas price minimum
+	if gasPrice.Cmp(pool.gasPrice) < 0 {
 		return ErrUnderpriced
 	}
 
-	// Add to queue
-	if pool.queue[from] == nil {
-		pool.queue[from] = newTxList(false)
-	}
-	inserted, _ := pool.queue[from].Add(tx, pool.config.PriceBump)
-	if !inserted {
-		return ErrReplaceUnderpriced
+	// Check for negative value
+	if tx.Value() != nil && tx.Value().Sign() < 0 {
+		return ErrNegativeValue
 	}
 
-	pool.all.Add(tx)
+	// Check data size limit (128KB)
+	if len(tx.Data()) > 128*1024 {
+		return ErrOversizedData
+	}
 
-	log.Trace("Pooled new transaction", "hash", hash, "from", from)
+	// If nonce matches current, add to pending directly
+	if tx.Nonce() == currentNonce {
+		if pool.pending[from] == nil {
+			pool.pending[from] = newTxList(true)
+		}
+		inserted, old := pool.pending[from].Add(tx, pool.config.PriceBump)
+		if !inserted {
+			return ErrReplaceUnderpriced
+		}
+		if old != nil {
+			pool.all.Remove(old.Hash())
+		}
+		pool.all.Add(tx)
+		log.Debug("Added pending transaction", "hash", hash, "from", from, "nonce", tx.Nonce())
+	} else {
+		// Add to queue for future processing
+		if pool.queue[from] == nil {
+			pool.queue[from] = newTxList(false)
+		}
+		inserted, old := pool.queue[from].Add(tx, pool.config.PriceBump)
+		if !inserted {
+			return ErrReplaceUnderpriced
+		}
+		if old != nil {
+			pool.all.Remove(old.Hash())
+		}
+		pool.all.Add(tx)
+		log.Debug("Added queued transaction", "hash", hash, "from", from, "nonce", tx.Nonce())
+	}
+
 	return nil
 }
 

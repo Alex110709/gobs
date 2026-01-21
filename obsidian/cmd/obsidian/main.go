@@ -137,6 +137,10 @@ func main() {
 			stealthCommand,
 			accountCommand,
 			consoleCommand,
+			healthCommand,
+			metricsCommand,
+			backupCommand,
+			nodeCommand,
 		},
 		Flags: []cli.Flag{
 			dataDirFlag,
@@ -506,6 +510,102 @@ func accountList(ctx *cli.Context) error {
 	fmt.Printf("Keystore directory: %s/keystore\n", dataDir)
 	fmt.Println("(Account listing from keystore not yet implemented)")
 	return nil
+}
+
+// healthCommand performs health checks
+var healthCommand = &cli.Command{
+	Name:  "health",
+	Usage: "Check node health status",
+	Flags: []cli.Flag{
+		dataDirFlag,
+	},
+	Action: func(ctx *cli.Context) error {
+		cfg := &CLIConfig{
+			DataDir: ctx.String(dataDirFlag.Name),
+		}
+		return HealthCheck(cfg)
+	},
+}
+
+// metricsCommand displays metrics
+var metricsCommand = &cli.Command{
+	Name:  "metrics",
+	Usage: "Display node metrics",
+	Flags: []cli.Flag{
+		dataDirFlag,
+	},
+	Action: func(ctx *cli.Context) error {
+		cfg := &CLIConfig{
+			DataDir: ctx.String(dataDirFlag.Name),
+		}
+		return ShowMetrics(cfg)
+	},
+}
+
+// backupCommand manages backups
+var backupCommand = &cli.Command{
+	Name:  "backup",
+	Usage: "Manage database backups",
+	Subcommands: []*cli.Command{
+		{
+			Name:      "create",
+			Usage:     "Create a database backup",
+			ArgsUsage: "[backup-name]",
+			Flags: []cli.Flag{
+				dataDirFlag,
+			},
+			Action: func(ctx *cli.Context) error {
+				backupName := ctx.Args().First()
+				if backupName == "" {
+					backupName = fmt.Sprintf("backup-%d", time.Now().Unix())
+				}
+				cfg := &CLIConfig{
+					DataDir: ctx.String(dataDirFlag.Name),
+				}
+				return CreateBackup(cfg, backupName)
+			},
+		},
+		{
+			Name:  "list",
+			Usage: "List available backups",
+			Flags: []cli.Flag{
+				dataDirFlag,
+			},
+			Action: func(ctx *cli.Context) error {
+				cfg := &CLIConfig{
+					DataDir: ctx.String(dataDirFlag.Name),
+				}
+				return ListBackups(cfg)
+			},
+		},
+	},
+}
+
+// nodeCommand shows node information
+var nodeCommand = &cli.Command{
+	Name:  "node",
+	Usage: "Show node information",
+	Flags: []cli.Flag{
+		dataDirFlag,
+		httpHostFlag,
+		httpPortFlag,
+		wsHostFlag,
+		wsPortFlag,
+		minerEnabledFlag,
+		logLevelFlag,
+	},
+	Action: func(ctx *cli.Context) error {
+		cfg := &CLIConfig{
+			DataDir:  ctx.String(dataDirFlag.Name),
+			HTTPAddr: ctx.String(httpHostFlag.Name),
+			HTTPPort: ctx.Int(httpPortFlag.Name),
+			WSAddr:   ctx.String(wsHostFlag.Name),
+			WSPort:   ctx.Int(wsPortFlag.Name),
+			Mining:   ctx.Bool(minerEnabledFlag.Name),
+			LogLevel: fmt.Sprintf("%d", ctx.Int(logLevelFlag.Name)),
+		}
+		return ShowNodeInfo(cfg)
+	},
 }
 
 // connectToSeedNodes attempts to connect to seed nodes

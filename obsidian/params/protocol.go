@@ -109,3 +109,22 @@ var MainnetStaticNodes = []string{
 	"129.154.52.54:8333",
 	"152.69.229.203:8333",
 }
+
+// CalculateBlockReward returns the block reward for a given block number
+func CalculateBlockReward(blockNum uint64) *big.Int {
+	config := DefaultObsidianashConfig()
+
+	// Calculate current epoch (number of halvings)
+	epoch := blockNum / config.HalvingInterval
+
+	// Cap at maximum halvings
+	if epoch > MaxHalvings {
+		return big.NewInt(0)
+	}
+
+	// Base reward after standard halving
+	reward := new(big.Int).Set(config.InitialReward)
+	reward.Rsh(reward, uint(epoch)) // Divide by 2^epoch
+
+	return reward
+}

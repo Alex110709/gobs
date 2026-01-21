@@ -4,6 +4,8 @@
 package types
 
 import (
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
@@ -17,4 +19,13 @@ type CallArgs struct {
 	Value    *hexutil.Big    `json:"value"`
 	Data     *hexutil.Bytes  `json:"data"`
 	Nonce    *hexutil.Uint64 `json:"nonce"`
+}
+
+// FilterQuery represents log filter criteria
+type FilterQuery struct {
+	BlockHash *common.Hash     `json:"blockHash"`
+	FromBlock *big.Int         `json:"fromBlock"`
+	ToBlock   *big.Int         `json:"toBlock"`
+	Addresses []common.Address `json:"address"`
+	Topics    [][]common.Hash  `json:"topics"`
 }

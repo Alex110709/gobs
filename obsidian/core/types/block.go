@@ -365,6 +365,19 @@ type ObsidianBody struct {
 	Withdrawals  types.Withdrawals
 }
 
+// Body is an alias for serialization purposes
+type Body struct {
+	Transactions []*StealthTransaction
+	Uncles       []*ObsidianHeader
+}
+
+// Empty hashes for empty fields
+var (
+	EmptyTxsHash      = common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyReceiptsHash = common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyUncleHash    = rlpHash([]*ObsidianHeader(nil))
+)
+
 // StealthTransactions implements types.DerivableList for stealth transactions
 type StealthTransactions []*StealthTransaction
 

@@ -141,8 +141,9 @@ type Handler struct {
 	peerCount  int32
 
 	// Synchronization
-	syncing    int32
-	syncTarget *Peer
+	syncing      int32
+	syncTarget   *Peer
+	synchronizer *Synchronizer
 
 	// Channels
 	quitCh     chan struct{}
@@ -230,6 +231,35 @@ func NewHandler(networkID uint64, backend Backend) *Handler {
 func (h *Handler) SetBackend(backend Backend) {
 	h.backend = backend
 	h.genesisHash = backend.GenesisHash()
+}
+
+// SetSynchronizer sets the blockchain synchronizer
+func (h *Handler) SetSynchronizer(sync *Synchronizer) {
+	h.synchronizer = sync
+}
+
+// StartSync starts the blockchain synchronizer
+func (h *Handler) StartSync() error {
+	if h.synchronizer == nil {
+		h.synchronizer = NewSynchronizer(h.backend, h)
+	}
+	return h.synchronizer.Start()
+}
+
+// StopSync stops the blockchain synchronizer
+func (h *Handler) StopSync() {
+	if h.synchronizer != nil {
+		h.synchronizer.Stop()
+	}
+}
+
+// SyncProgress returns the current sync progress
+func (h *Handler) SyncProgress() (start, current, target uint64, syncing bool) {
+	if h.synchronizer != nil {
+		return h.synchronizer.Progress()
+	}
+	head := h.backend.CurrentBlock()
+	return head.Number.Uint64(), head.Number.Uint64(), head.Number.Uint64(), false
 }
 
 // Protocol returns the P2P protocol descriptor
@@ -649,12 +679,19 @@ func (h *Handler) handleNewBlock(p *Peer, msg p2p.Msg) error {
 
 	// Update peer's head
 	p.lock.Lock()
-	if packet.TD.Cmp(p.td) > 0 {
+	if packet.TD != nil && (p.td == nil || packet.TD.Cmp(p.td) > 0) {
 		p.head = hash
 		p.td = packet.TD
 		p.number = block.NumberU64()
 	}
 	p.lock.Unlock()
+
+	// Deliver to synchronizer if syncing
+	if h.synchronizer != nil && h.synchronizer.Syncing() {
+		h.synchronizer.DeliverBlock(block)
+		atomic.AddUint64(&h.blocksReceived, 1)
+		return nil
+	}
 
 	// Check if we already have this block
 	if h.backend.HasBlock(hash) {
@@ -834,7 +871,13 @@ func (h *Handler) BroadcastTxs(txs []*obstypes.StealthTransaction) {
 
 // checkSync checks if we need to sync with a peer
 func (h *Handler) checkSync(p *Peer) {
-	// Only one sync at a time
+	// Use the synchronizer if available
+	if h.synchronizer != nil {
+		// Synchronizer handles its own sync checks
+		return
+	}
+
+	// Fallback: basic sync logic
 	if !atomic.CompareAndSwapInt32(&h.syncing, 0, 1) {
 		return
 	}
@@ -851,7 +894,7 @@ func (h *Handler) checkSync(p *Peer) {
 	peerNum := p.number
 	p.lock.RUnlock()
 
-	if peerTD.Cmp(ourTD) <= 0 {
+	if peerTD == nil || peerTD.Cmp(ourTD) <= 0 {
 		return
 	}
 

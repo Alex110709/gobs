@@ -7,20 +7,29 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 
+	"github.com/obsidian-chain/obsidian/accounts/keystore"
+	"github.com/obsidian-chain/obsidian/backup"
 	"github.com/obsidian-chain/obsidian/consensus/obsidianash"
 	obsstate "github.com/obsidian-chain/obsidian/core/state"
 	obstypes "github.com/obsidian-chain/obsidian/core/types"
 	"github.com/obsidian-chain/obsidian/core/txpool"
+	"github.com/obsidian-chain/obsidian/health"
 	"github.com/obsidian-chain/obsidian/miner"
+	"github.com/obsidian-chain/obsidian/metrics"
 	"github.com/obsidian-chain/obsidian/params"
+	"github.com/obsidian-chain/obsidian/shutdown"
+	"github.com/obsidian-chain/obsidian/stealth"
 )
 
 var (
@@ -39,10 +48,12 @@ type Backend struct {
 	config *Config
 
 	// Core components
-	engine  *obsidianash.ObsidianAsh
-	txPool  *txpool.TxPool
-	miner   *miner.Miner
-	state   *obsstate.StateDB
+	engine        *obsidianash.ObsidianAsh
+	txPool        *txpool.TxPool
+	miner         *miner.Miner
+	state         *obsstate.StateDB
+	keystore      *keystore.KeystoreWrapper
+	stealthSvc    *stealth.StealthService
 
 	// Blockchain data
 	chainMu      sync.RWMutex
@@ -58,9 +69,16 @@ type Backend struct {
 	p2pHandler BlockBroadcaster
 
 	// Events
-	chainHeadFeed     event.Feed
-	minedBlockFeed    event.Feed  // For broadcasting mined blocks
-	scope             event.SubscriptionScope
+	chainHeadFeed  event.Feed
+	minedBlockFeed event.Feed // For broadcasting mined blocks
+	newBlockFeed   event.Feed // For stealth scanning
+	scope          event.SubscriptionScope
+
+	// Production features
+	shutdownMgr *shutdown.Manager
+	metricsReg  *metrics.MetricsRegistry
+	healthMon   *health.Monitor
+	backupMgr   *backup.Manager
 
 	// Shutdown
 	shutdownCh chan struct{}
@@ -128,14 +146,33 @@ func New(config *Config) (*Backend, error) {
 	// Create state
 	stateDB := obsstate.NewMemoryStateDB()
 
+	// Create keystore
+	keystoreDir := filepath.Join(config.DataDir, "keystore")
+	ks := keystore.NewKeyStore(keystoreDir)
+
+	// Create stealth service
+	stealthSvc := stealth.NewStealthService()
+
+	// Create production components
+	shutdownMgr := shutdown.New(30 * time.Second)
+	metricsReg := metrics.NewMetricsRegistry()
+	healthMon := health.New()
+	backupMgr := backup.New(config.DataDir, 5) // Keep last 5 backups
+
 	// Create backend
 	b := &Backend{
 		config:      config,
 		engine:      engine,
 		state:       stateDB,
+		keystore:    keystore.NewKeystoreWrapper(ks),
+		stealthSvc:  stealthSvc,
 		blocks:      make(map[common.Hash]*obstypes.ObsidianBlock),
 		blocksByNum: make(map[uint64]*obstypes.ObsidianBlock),
 		txLookup:    make(map[common.Hash]*txLookupEntry),
+		shutdownMgr: shutdownMgr,
+		metricsReg:  metricsReg,
+		healthMon:   healthMon,
+		backupMgr:   backupMgr,
 		shutdownCh:  make(chan struct{}),
 	}
 
@@ -150,6 +187,12 @@ func New(config *Config) (*Backend, error) {
 
 	// Create miner
 	b.miner = miner.New(&config.MinerConfig, b, engine)
+
+	// Register health checks
+	b.registerHealthChecks()
+
+	// Register shutdown handlers
+	b.registerShutdownHandlers()
 
 	log.Info("Obsidian backend initialized",
 		"chainId", config.ChainID,
@@ -442,6 +485,9 @@ func (b *Backend) InsertBlock(block *obstypes.ObsidianBlock) error {
 	// Also send to minedBlockFeed for other subscribers
 	b.minedBlockFeed.Send(MinedBlockEvent{Block: block})
 
+	// Notify stealth scanners of new block
+	b.notifyNewBlock(block.NumberU64())
+
 	log.Info("Block inserted",
 		"number", block.NumberU64(),
 		"hash", hash.Hex(),
@@ -567,4 +613,264 @@ func (b *Backend) BroadcastBlock(block *obstypes.ObsidianBlock) {
 	if b.p2pHandler != nil {
 		b.p2pHandler.BroadcastBlock(block)
 	}
+}
+
+// SendRawTransaction sends a raw encoded transaction
+func (b *Backend) SendRawTransaction(ctx context.Context, encodedTx []byte) (common.Hash, error) {
+	tx := new(obstypes.StealthTransaction)
+	if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
+		return common.Hash{}, err
+	}
+	if err := b.txPool.Add(tx, true); err != nil {
+		return common.Hash{}, err
+	}
+	return tx.Hash(), nil
+}
+
+// GetPoolTransactions returns all transactions in the pool
+func (b *Backend) GetPoolTransactions() []*obstypes.StealthTransaction {
+	pending := b.txPool.Pending(true)
+	var txs []*obstypes.StealthTransaction
+	for _, list := range pending {
+		txs = append(txs, list...)
+	}
+	return txs
+}
+
+// GetPoolTransaction returns a specific transaction from the pool
+func (b *Backend) GetPoolTransaction(hash common.Hash) *obstypes.StealthTransaction {
+	return b.txPool.Get(hash)
+}
+
+// GetStorageAt returns storage value at a given position
+func (b *Backend) GetStorageAt(ctx context.Context, address common.Address, key common.Hash, blockNr rpc.BlockNumber) (common.Hash, error) {
+	return b.state.GetState(address, key), nil
+}
+
+// Call executes a message call
+func (b *Backend) Call(ctx context.Context, args obstypes.CallArgs, blockNr rpc.BlockNumber) (hexutil.Bytes, error) {
+	// For now, return empty - full implementation would require EVM execution
+	// This is a placeholder for contract calls
+	if args.To == nil {
+		return nil, errors.New("contract creation not supported in call")
+	}
+
+	// Get code at the address
+	code := b.state.GetCode(*args.To)
+	if len(code) == 0 {
+		// If no code, just return empty
+		return hexutil.Bytes{}, nil
+	}
+
+	// Full EVM execution would go here
+	// For now, return empty bytes
+	return hexutil.Bytes{}, nil
+}
+
+// GetCoinbase returns the current coinbase address
+func (b *Backend) GetCoinbase() common.Address {
+	return b.miner.Coinbase()
+}
+
+// StartMining starts the miner with specified threads
+func (b *Backend) StartMiningWithThreads(threads int) error {
+	// Thread configuration is not yet implemented
+	// Just start the miner
+	return b.miner.Start()
+}
+
+// StopMiningAsync stops the miner without returning error
+func (b *Backend) StopMiningAsync() {
+	_ = b.miner.Stop()
+}
+
+// GetLogs returns logs matching the filter criteria
+func (b *Backend) GetLogs(ctx context.Context, filter obstypes.FilterQuery) ([]*obstypes.Log, error) {
+	var logs []*obstypes.Log
+
+	// Determine block range
+	var fromBlock, toBlock uint64
+	if filter.FromBlock != nil {
+		fromBlock = filter.FromBlock.Uint64()
+	}
+	if filter.ToBlock != nil {
+		toBlock = filter.ToBlock.Uint64()
+	} else {
+		toBlock = b.currentBlock.NumberU64()
+	}
+
+	// For now, return empty logs since we don't have full receipt storage
+	// Iterate through blocks
+	b.chainMu.RLock()
+	defer b.chainMu.RUnlock()
+
+	for num := fromBlock; num <= toBlock; num++ {
+		block := b.blocksByNum[num]
+		if block == nil {
+			continue
+		}
+
+		// Get receipts for this block (simplified - would need receipt storage)
+		// For now, return empty as we don't have full receipt storage
+	}
+
+	return logs, nil
+}
+
+// GetKeystore returns the keystore backend for account management
+func (b *Backend) GetKeystore() interface{} {
+	return b.keystore
+}
+
+// GetStealthService returns the stealth service
+func (b *Backend) GetStealthService() *stealth.StealthService {
+	return b.stealthSvc
+}
+
+// GetStealthTransactions implements stealth.BlockchainBackend
+func (b *Backend) GetStealthTransactions(ctx context.Context, blockNumber uint64) ([]stealth.StealthTxData, error) {
+	b.chainMu.RLock()
+	block, exists := b.blocksByNum[blockNumber]
+	b.chainMu.RUnlock()
+
+	if !exists {
+		return nil, ErrNotFound
+	}
+
+	var stealthTxs []stealth.StealthTxData
+	for _, tx := range block.Transactions() {
+		// Check if this is a stealth transaction
+		ephemeralPubKey := tx.EphemeralPubKey()
+		if len(ephemeralPubKey) == 0 {
+			continue
+		}
+
+		stealthTxs = append(stealthTxs, stealth.StealthTxData{
+			TxHash:          tx.Hash(),
+			ToAddress:       *tx.To(),
+			EphemeralPubKey: ephemeralPubKey,
+			ViewTag:         tx.ViewTag(),
+			Amount:          tx.Value().String(),
+		})
+	}
+
+	return stealthTxs, nil
+}
+
+// CurrentBlockNumber returns the current block number (for stealth.BlockchainBackend)
+func (b *Backend) CurrentBlockNumber(ctx context.Context) (uint64, error) {
+	b.chainMu.RLock()
+	defer b.chainMu.RUnlock()
+
+	if b.currentBlock == nil {
+		return 0, nil
+	}
+	return b.currentBlock.NumberU64(), nil
+}
+
+// SubscribeNewBlocks implements stealth.BlockchainBackend
+func (b *Backend) SubscribeNewBlocks(ctx context.Context, ch chan<- uint64) error {
+	sub := b.newBlockFeed.Subscribe(ch)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			sub.Unsubscribe()
+		case <-b.shutdownCh:
+			sub.Unsubscribe()
+		}
+	}()
+
+	return nil
+}
+
+// notifyNewBlock notifies subscribers of a new block
+func (b *Backend) notifyNewBlock(blockNumber uint64) {
+	b.newBlockFeed.Send(blockNumber)
+}
+
+// registerHealthChecks registers health checks for the backend
+func (b *Backend) registerHealthChecks() {
+	// Register blockchain health check
+	b.healthMon.Register(&health.BlockchainCheck{
+		CurrentBlock: func() (uint64, error) {
+			return b.CurrentBlockNumber(context.Background())
+		},
+		LastBlockTime: func() time.Time {
+			b.chainMu.RLock()
+			defer b.chainMu.RUnlock()
+			if b.currentBlock == nil {
+				return time.Time{}
+			}
+			return time.Unix(int64(b.currentBlock.Time()), 0)
+		},
+	}, true) // Critical check
+
+	// Register network health check
+	b.healthMon.Register(&health.NetworkCheck{
+		PeerCount: func() int {
+			if b.p2pHandler == nil {
+				return 0
+			}
+			return b.p2pHandler.PeerCount()
+		},
+		MinPeers: 0, // Allow running with no peers for now
+	}, false) // Non-critical
+
+	// Register transaction pool health check
+	b.healthMon.Register(&health.TransactionPoolCheck{
+		PoolSize: func() int {
+			executable, _ := b.txPool.Stats()
+			return executable
+		},
+		MaxSize: int(b.config.TxPoolConfig.GlobalSlots),
+	}, false) // Non-critical
+}
+
+// registerShutdownHandlers registers graceful shutdown handlers
+func (b *Backend) registerShutdownHandlers() {
+	// Register miner shutdown
+	b.shutdownMgr.Register(shutdown.NewSimpleHandler("miner", func(ctx context.Context) error {
+		b.miner.Close()
+		return nil
+	}))
+
+	// Register transaction pool shutdown
+	b.shutdownMgr.Register(shutdown.NewSimpleHandler("txpool", func(ctx context.Context) error {
+		b.txPool.Stop()
+		return nil
+	}))
+
+	// Register event scope shutdown
+	b.shutdownMgr.Register(shutdown.NewSimpleHandler("events", func(ctx context.Context) error {
+		b.scope.Close()
+		return nil
+	}))
+
+	// Register backup shutdown handler (creates final backup)
+	b.shutdownMgr.Register(shutdown.NewSimpleHandler("backup", func(ctx context.Context) error {
+		name := "shutdown-" + time.Now().Format("2006-01-02-150405")
+		_, err := b.backupMgr.Create(name)
+		if err != nil {
+			log.Warn("Failed to create shutdown backup", "err", err)
+			return nil // Don't fail shutdown for backup failure
+		}
+		log.Info("Shutdown backup created", "name", name)
+		return nil
+	}))
+}
+
+// GetShutdownManager returns the shutdown manager for external use
+func (b *Backend) GetShutdownManager() *shutdown.Manager {
+	return b.shutdownMgr
+}
+
+// GetHealthMonitor returns the health monitor for external use
+func (b *Backend) GetHealthMonitor() *health.Monitor {
+	return b.healthMon
+}
+
+// GetMetrics returns the metrics registry for external use
+func (b *Backend) GetMetrics() *metrics.MetricsRegistry {
+	return b.metricsReg
 }

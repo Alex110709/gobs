@@ -11,8 +11,6 @@ import (
 
 // Metrics holds all system metrics
 type Metrics struct {
-	mu sync.RWMutex
-
 	// Block metrics
 	BlocksProcessed   int64
 	BlocksRejected    int64

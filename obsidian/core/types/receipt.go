@@ -68,13 +68,6 @@ type receiptRLP struct {
 	Logs              []*Log
 }
 
-// receiptStorageRLP is the storage encoding of a receipt.
-type receiptStorageRLP struct {
-	PostStateOrStatus []byte
-	CumulativeGasUsed uint64
-	Logs              []*LogForStorage
-}
-
 // NewReceipt creates a new receipt
 func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
 	r := &Receipt{

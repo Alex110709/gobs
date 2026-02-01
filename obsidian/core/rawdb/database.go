@@ -27,18 +27,12 @@ var (
 	blockBodyPrefix     = []byte("b") // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	blockReceiptsPrefix = []byte("r") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
-	txLookupPrefix      = []byte("l") // txLookupPrefix + hash -> transaction lookup entry
-	bloomBitsPrefix     = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	txLookupPrefix = []byte("l") // txLookupPrefix + hash -> transaction lookup entry
 
-	codePrefix          = []byte("c") // codePrefix + code hash -> contract code
+	codePrefix = []byte("c") // codePrefix + code hash -> contract code
 
-	headHeaderKey       = []byte("LastHeader")
-	headBlockKey        = []byte("LastBlock")
-	headFastBlockKey    = []byte("LastFast")
-
-	// State trie keys
-	stateTriePrefix     = []byte("s") // stateTriePrefix + root -> state trie node
-	storageTriePrefix   = []byte("S") // storageTriePrefix + account hash + root -> storage trie node
+	headHeaderKey = []byte("LastHeader")
+	headBlockKey  = []byte("LastBlock")
 
 	// Account state keys (for flat state)
 	accountPrefix       = []byte("a") // accountPrefix + address hash -> account data

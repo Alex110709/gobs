@@ -359,7 +359,7 @@ func encodeHeader(hasher hash.Hash, header *types.Header) {
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
-	rlp.Encode(hasher, enc)
+	_ = rlp.Encode(hasher, enc)
 }
 
 // CalcDifficulty calculates the difficulty for a new block

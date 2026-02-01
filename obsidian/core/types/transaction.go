@@ -203,7 +203,7 @@ func (tx *StealthTransaction) Size() uint64 {
 		return size.(uint64)
 	}
 	c := writeCounter(0)
-	rlp.Encode(&c, tx)
+	_ = rlp.Encode(&c, tx)
 	size := uint64(c)
 	tx.size.Store(size)
 	return size

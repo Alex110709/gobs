@@ -981,7 +981,7 @@ func (h *Handler) syncMissingBlocks(p *Peer, fromNum, toNum uint64) {
 			"from", fromNum,
 			"to", toNum,
 		)
-		h.synchronizer.Start()
+		_ = h.synchronizer.Start()
 		return
 	}
 

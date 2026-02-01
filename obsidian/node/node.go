@@ -437,7 +437,7 @@ func (n *Node) startIPC() error {
 	n.ipcListener = listener
 	n.ipcHandler = handler
 
-	go handler.ServeListener(listener)
+	go func() { _ = handler.ServeListener(listener) }()
 	n.log.Info("IPC server started", "endpoint", ipcPath)
 	return nil
 }

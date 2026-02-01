@@ -345,7 +345,7 @@ func WriteTxLookupEntriesByBlock(db *Database, txHashes []common.Hash, blockHash
 			TxIndex:    uint64(i),
 		}
 		data, _ := rlp.EncodeToBytes(entry)
-		batch.Put(txLookupKey(txHash), data)
+		_ = batch.Put(txLookupKey(txHash), data)
 	}
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to write tx lookup entries", "err", err)

@@ -230,7 +230,7 @@ func (bs *BlockScanner) scanLoop(ctx context.Context, startBlock uint64) {
 	newBlocks := make(chan uint64, 10)
 
 	// Subscribe to new blocks
-	go bs.backend.SubscribeNewBlocks(ctx, newBlocks)
+	go func() { _ = bs.backend.SubscribeNewBlocks(ctx, newBlocks) }()
 
 	for {
 		select {

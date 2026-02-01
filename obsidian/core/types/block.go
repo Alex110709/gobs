@@ -71,7 +71,7 @@ func (h *ObsidianHeader) Hash() common.Hash {
 // Size returns the approximate memory used by the header
 func (h *ObsidianHeader) Size() uint64 {
 	c := writeCounter(0)
-	rlp.Encode(&c, h)
+	_ = rlp.Encode(&c, h)
 	return uint64(c)
 }
 
@@ -150,7 +150,7 @@ func DeriveSha(list StealthTransactions) common.Hash {
 	for i := 0; i < list.Len(); i++ {
 		buf.Reset()
 		list.EncodeIndex(i, &buf)
-		hasher.Update(rlp.AppendUint64(nil, uint64(i)), buf.Bytes())
+		_ = hasher.Update(rlp.AppendUint64(nil, uint64(i)), buf.Bytes())
 	}
 	return hasher.Hash()
 }
@@ -326,7 +326,7 @@ func (b *ObsidianBlock) Size() uint64 {
 		return size.(uint64)
 	}
 	c := writeCounter(0)
-	rlp.Encode(&c, b)
+	_ = rlp.Encode(&c, b)
 	size := uint64(c)
 	b.size.Store(size)
 	return size
@@ -386,7 +386,7 @@ func (s StealthTransactions) Len() int { return len(s) }
 
 // EncodeIndex encodes the i-th transaction to the buffer
 func (s StealthTransactions) EncodeIndex(i int, w *bytes.Buffer) {
-	rlp.Encode(w, s[i])
+	_ = rlp.Encode(w, s[i])
 }
 
 // Errors

@@ -510,7 +510,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	}
 
 	var root common.Hash
-	hasher.Read(root[:])
+	_, _ = hasher.Read(root[:])
 
 	if root == (common.Hash{}) {
 		return emptyRoot
@@ -550,7 +550,7 @@ func (s *StateDB) CommitToDB(db *rawdb.Database, root common.Hash) error {
 		if err != nil {
 			return err
 		}
-		batch.Put(append([]byte("a"), obj.addrHash[:]...), data)
+		_ = batch.Put(append([]byte("a"), obj.addrHash[:]...), data)
 
 		// Write code if any
 		if len(obj.code) > 0 && obj.dirty {

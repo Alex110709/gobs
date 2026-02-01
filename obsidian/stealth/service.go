@@ -204,7 +204,7 @@ func (s *StealthService) autoScanLoop(ctx context.Context) {
 		s.mu.RUnlock()
 
 		if backend != nil {
-			backend.SubscribeNewBlocks(ctx, newBlocks)
+			_ = backend.SubscribeNewBlocks(ctx, newBlocks)
 		}
 	}()
 

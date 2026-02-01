@@ -164,7 +164,7 @@ func (d *Downloader) checkAndSync() {
 	}
 
 	// Start sync
-	go d.synchronise(bestPeer, peerNum)
+	go func() { _ = d.synchronise(bestPeer, peerNum) }()
 }
 
 // findBestPeer finds the peer with the highest TD

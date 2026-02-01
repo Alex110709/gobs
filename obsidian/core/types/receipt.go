@@ -52,10 +52,10 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
 	data := &receiptRLP{r.PostState, r.Status, r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
-		rlp.Encode(w, data)
+		_ = rlp.Encode(w, data)
 	} else {
 		w.WriteByte(r.Type)
-		rlp.Encode(w, data)
+		_ = rlp.Encode(w, data)
 	}
 }
 
@@ -98,7 +98,7 @@ func (r *Receipt) EncodeRLP(w *rlp.EncoderBuffer) error {
 	}
 	buf := w.List()
 	w.WriteBytes([]byte{r.Type})
-	rlp.Encode(w, data)
+	_ = rlp.Encode(w, data)
 	w.ListEnd(buf)
 	return nil
 }

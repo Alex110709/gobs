@@ -363,8 +363,8 @@ func (c *writeCounter) Write(b []byte) (int, error) {
 
 func rlpHash(x interface{}) (h common.Hash) {
 	hw := crypto.NewKeccakState()
-	rlp.Encode(hw, x)
-	hw.Read(h[:])
+	_ = rlp.Encode(hw, x)
+	_, _ = hw.Read(h[:])
 	return h
 }
 

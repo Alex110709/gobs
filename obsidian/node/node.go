@@ -356,7 +356,7 @@ func (n *Node) startHTTP() error {
 	n.httpListener = listener
 	n.httpHandler = handler
 
-	go handler.ServeListener(listener)
+	go func() { _ = handler.ServeListener(listener) }()
 	n.log.Info("HTTP server started", "endpoint", endpoint)
 	return nil
 }
@@ -394,7 +394,7 @@ func (n *Node) startWS() error {
 	n.wsListener = listener
 	n.wsHandler = handler
 
-	go handler.ServeListener(listener)
+	go func() { _ = handler.ServeListener(listener) }()
 	n.log.Info("WebSocket server started", "endpoint", endpoint)
 	return nil
 }

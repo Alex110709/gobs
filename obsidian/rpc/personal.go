@@ -204,7 +204,7 @@ func (api *PrivateAccountAPI) Sign(ctx context.Context, data hexutil.Bytes, addr
 	if err := ks.Unlock(addr, password, time.Second); err != nil {
 		return nil, err
 	}
-	defer ks.Lock(addr)
+	defer func() { _ = ks.Lock(addr) }()
 
 	sig, err := ks.SignHash(addr, hash)
 	if err != nil {

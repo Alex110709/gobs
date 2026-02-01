@@ -145,6 +145,10 @@ type Handler struct {
 	syncTarget   *Peer
 	synchronizer *Synchronizer
 
+	// Pending blocks (blocks waiting for parent to arrive)
+	pendingBlocks   map[common.Hash]*obstypes.ObsidianBlock // parentHash -> block
+	pendingBlocksMu sync.RWMutex
+
 	// Channels
 	quitCh     chan struct{}
 	blockAnnounceCh chan *obstypes.ObsidianBlock
@@ -222,6 +226,7 @@ func NewHandler(networkID uint64, backend Backend) *Handler {
 		genesisHash:     backend.GenesisHash(),
 		peers:           make(map[string]*Peer),
 		maxPeers:        50,
+		pendingBlocks:   make(map[common.Hash]*obstypes.ObsidianBlock),
 		quitCh:          make(chan struct{}),
 		blockAnnounceCh: make(chan *obstypes.ObsidianBlock, 10),
 	}
@@ -473,7 +478,7 @@ func (h *Handler) handlePeer(p *Peer) error {
 		switch msg.Code {
 		case StatusMsg:
 			// Already handled in handshake
-			msg.Discard()
+			_ = msg.Discard()
 
 		case NewBlockHashesMsg:
 			if err := h.handleNewBlockHashes(p, msg); err != nil {
@@ -530,7 +535,7 @@ func (h *Handler) handlePeer(p *Peer) error {
 
 		default:
 			log.Debug("Unknown message", "code", msg.Code)
-			msg.Discard()
+			_ = msg.Discard()
 		}
 	}
 }
@@ -706,8 +711,36 @@ func (h *Handler) handleNewBlock(p *Peer, msg p2p.Msg) error {
 		"txs", len(block.Transactions()),
 	)
 
-	// Insert block
-	if err := h.backend.InsertBlock(block); err != nil {
+	// Check if we have the parent block
+	parentHash := block.ParentHash()
+	if !h.backend.HasBlock(parentHash) {
+		// Store in pending blocks (keyed by parent hash)
+		h.pendingBlocksMu.Lock()
+		h.pendingBlocks[parentHash] = block
+		pendingCount := len(h.pendingBlocks)
+		h.pendingBlocksMu.Unlock()
+
+		// We're missing parent block(s), need to sync
+		ourHead := h.backend.CurrentBlock()
+		ourNum := ourHead.Number.Uint64()
+		blockNum := block.NumberU64()
+
+		log.Info("Missing parent block, stored in pending",
+			"our_head", ourNum,
+			"received_block", blockNum,
+			"parent_hash", parentHash.Hex()[:16],
+			"pending_count", pendingCount,
+		)
+
+		// Request missing blocks from peer (only if we're behind)
+		if blockNum > ourNum+1 {
+			go h.syncMissingBlocks(p, ourNum+1, blockNum-1)
+		}
+		return nil
+	}
+
+	// Insert block and process any pending children
+	if err := h.insertBlockAndChildren(block); err != nil {
 		log.Warn("Failed to insert received block", "err", err)
 		return nil // Don't disconnect, just log
 	}
@@ -814,6 +847,7 @@ func (h *Handler) sendTransactions(p *Peer, txs []*obstypes.StealthTransaction) 
 // BroadcastBlock sends a block to all connected peers
 func (h *Handler) BroadcastBlock(block *obstypes.ObsidianBlock) {
 	hash := block.Hash()
+	totalPeers := h.PeerCount()
 
 	h.peersMu.RLock()
 	peers := make([]*Peer, 0, len(h.peers))
@@ -824,21 +858,45 @@ func (h *Handler) BroadcastBlock(block *obstypes.ObsidianBlock) {
 	}
 	h.peersMu.RUnlock()
 
-	for _, p := range peers {
-		select {
-		case p.queuedBlocks <- block:
-		default:
-			log.Debug("Dropping block broadcast", "peer", p.id[:16])
-		}
-	}
-
-	if len(peers) > 0 {
-		log.Info("Block broadcast queued",
+	if totalPeers == 0 {
+		log.Warn("No peers connected, cannot broadcast block",
 			"number", block.NumberU64(),
 			"hash", hash.Hex()[:16],
-			"peers", len(peers),
 		)
+		return
 	}
+
+	if len(peers) == 0 {
+		log.Debug("All peers already know this block",
+			"number", block.NumberU64(),
+			"hash", hash.Hex()[:16],
+			"total_peers", totalPeers,
+		)
+		return
+	}
+
+	// Broadcast to all peers that don't know this block
+	var sent int
+	for _, p := range peers {
+		// Send directly instead of queuing for immediate delivery
+		go func(peer *Peer) {
+			if err := h.sendNewBlock(peer, block); err != nil {
+				log.Debug("Failed to broadcast block to peer",
+					"peer", peer.id[:16],
+					"block", block.NumberU64(),
+					"err", err,
+				)
+			}
+		}(p)
+		sent++
+	}
+
+	log.Info("Block broadcast initiated",
+		"number", block.NumberU64(),
+		"hash", hash.Hex()[:16],
+		"peers", sent,
+		"total_peers", totalPeers,
+	)
 }
 
 // BroadcastTxs sends transactions to all connected peers
@@ -912,6 +970,89 @@ func (h *Handler) checkSync(p *Peer) {
 		}
 		time.Sleep(100 * time.Millisecond) // Rate limit
 	}
+}
+
+// syncMissingBlocks requests missing blocks from a peer to fill gaps in our chain
+func (h *Handler) syncMissingBlocks(p *Peer, fromNum, toNum uint64) {
+	// Use synchronizer if available
+	if h.synchronizer != nil {
+		log.Info("Triggering synchronizer for missing blocks",
+			"peer", p.id[:16],
+			"from", fromNum,
+			"to", toNum,
+		)
+		h.synchronizer.Start()
+		return
+	}
+
+	// Fallback: request blocks directly
+	log.Info("Requesting missing blocks",
+		"peer", p.id[:16],
+		"from", fromNum,
+		"to", toNum,
+	)
+
+	for num := fromNum; num <= toNum; num++ {
+		if err := p2p.Send(p.rw, GetBlockByNumberMsg, num); err != nil {
+			log.Error("Failed to request block", "number", num, "err", err)
+			return
+		}
+		// Wait a bit for response before requesting next
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// insertBlockAndChildren inserts a block and any pending child blocks
+func (h *Handler) insertBlockAndChildren(block *obstypes.ObsidianBlock) error {
+	// Insert the block
+	if err := h.backend.InsertBlock(block); err != nil {
+		return err
+	}
+
+	log.Info("Block inserted successfully",
+		"number", block.NumberU64(),
+		"hash", block.Hash().Hex()[:16],
+	)
+
+	// Check if any pending blocks are waiting for this block as parent
+	blockHash := block.Hash()
+	for {
+		h.pendingBlocksMu.Lock()
+		child, exists := h.pendingBlocks[blockHash]
+		if exists {
+			delete(h.pendingBlocks, blockHash)
+		}
+		h.pendingBlocksMu.Unlock()
+
+		if !exists {
+			break
+		}
+
+		// Insert the child block
+		if err := h.backend.InsertBlock(child); err != nil {
+			log.Warn("Failed to insert pending child block",
+				"number", child.NumberU64(),
+				"hash", child.Hash().Hex()[:16],
+				"err", err,
+			)
+			break
+		}
+
+		log.Info("Pending block inserted",
+			"number", child.NumberU64(),
+			"hash", child.Hash().Hex()[:16],
+		)
+
+		atomic.AddUint64(&h.blocksReceived, 1)
+
+		// Broadcast the child block too
+		h.BroadcastBlock(child)
+
+		// Continue with the next child
+		blockHash = child.Hash()
+	}
+
+	return nil
 }
 
 // PeerCount returns the number of connected peers

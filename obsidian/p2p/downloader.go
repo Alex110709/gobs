@@ -54,8 +54,6 @@ type Downloader struct {
 
 	// Request tracking
 	pendingRequests map[uint64]*syncRequest
-	requestMu       sync.Mutex
-	requestID       uint64
 
 	// Channels for received data
 	headerCh chan headerResponse
@@ -69,7 +67,6 @@ type Downloader struct {
 }
 
 type syncRequest struct {
-	id        uint64
 	peer      *Peer
 	from      uint64
 	count     uint64

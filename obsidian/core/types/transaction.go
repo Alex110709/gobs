@@ -65,7 +65,6 @@ type StealthTransaction struct {
 	// caches
 	hash atomic.Value
 	size atomic.Value
-	from atomic.Value
 }
 
 // NewStealthTransaction creates a new stealth transaction

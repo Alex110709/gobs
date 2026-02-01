@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/obsidian-chain/obsidian/core/state"
 	obstypes "github.com/obsidian-chain/obsidian/core/types"
@@ -98,8 +97,7 @@ type TxPool struct {
 	all    *txLookup // All transactions in the pool
 	priced *txPricedList
 
-	chainHeadCh  chan *obstypes.ObsidianBlock
-	chainHeadSub event.Subscription
+	chainHeadCh chan *obstypes.ObsidianBlock
 
 	reqResetCh      chan *txPoolResetRequest
 	reqPromoteCh    chan *accountSet
@@ -454,18 +452,6 @@ func (pool *TxPool) SetGasPrice(price *big.Int) {
 // accountSet is a set of accounts
 type accountSet struct {
 	accounts map[common.Address]struct{}
-	signer   obstypes.StealthSigner
-}
-
-func newAccountSet(signer obstypes.StealthSigner, addrs ...common.Address) *accountSet {
-	as := &accountSet{
-		accounts: make(map[common.Address]struct{}),
-		signer:   signer,
-	}
-	for _, addr := range addrs {
-		as.accounts[addr] = struct{}{}
-	}
-	return as
 }
 
 func (as *accountSet) flatten() []common.Address {
@@ -566,8 +552,3 @@ type txSortedMap struct {
 	items map[uint64]*obstypes.StealthTransaction
 }
 
-func newTxSortedMap() *txSortedMap {
-	return &txSortedMap{
-		items: make(map[uint64]*obstypes.StealthTransaction),
-	}
-}

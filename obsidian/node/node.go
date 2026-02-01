@@ -117,7 +117,6 @@ type Node struct {
 	startStopLock sync.Mutex
 	state         int // 0 = stopped, 1 = running
 	lock          sync.Mutex
-	lifecycles    []Lifecycle
 	services      map[string]Lifecycle
 	closeCh       chan struct{}
 }

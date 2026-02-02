@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestGenerateStealthKeyPair(t *testing.T) {
@@ -230,6 +231,17 @@ func TestWrongRecipientCannotIdentify(t *testing.T) {
 	stealthAddr, err := GenerateStealthAddress(metaAddr)
 	if err != nil {
 		t.Fatalf("Failed to generate stealth address: %v", err)
+	}
+
+	// Ensure the wrong recipient's view tag doesn't collide by chance (1/256 probability)
+	// If it does, just generate a new one
+	for {
+		ephPubKey, _ := DecompressPublicKey(stealthAddr.EphemeralPubKey)
+		sharedSecret := SharedSecret(wrongKeyPair.ViewPrivateKey, ephPubKey)
+		if crypto.Keccak256(sharedSecret)[0] != stealthAddr.ViewTag {
+			break
+		}
+		wrongKeyPair, _ = GenerateStealthKeyPair()
 	}
 
 	// Wrong recipient should NOT be able to identify this address as theirs

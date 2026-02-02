@@ -100,7 +100,6 @@ type Miner struct {
 	chainHeadSub event.Subscription
 
 	// Stats
-	hashrate     uint64 // atomic
 	minedBlocks  uint64 // atomic
 
 	wg sync.WaitGroup

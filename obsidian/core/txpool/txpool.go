@@ -549,6 +549,5 @@ func newTxPricedList(all *txLookup) *txPricedList {
 
 // txSortedMap is a nonce-sorted map of transactions
 type txSortedMap struct {
-	items map[uint64]*obstypes.StealthTransaction
 }
 

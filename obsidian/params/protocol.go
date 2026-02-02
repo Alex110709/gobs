@@ -82,8 +82,8 @@ const (
 
 // Genesis block constants
 const (
-	GenesisGasLimit uint64 = 30_000_000
-	GenesisDifficulty      = 131072
+	GenesisGasLimit     uint64 = 30_000_000
+	GenesisDifficulty   uint64 = 131072
 )
 
 // P2P Network constants

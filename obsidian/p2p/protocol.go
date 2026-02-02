@@ -142,7 +142,6 @@ type Handler struct {
 
 	// Synchronization
 	syncing      int32
-	syncTarget   *Peer
 	synchronizer *Synchronizer
 	downloader   *Downloader
 

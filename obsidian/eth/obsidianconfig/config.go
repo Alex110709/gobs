@@ -9,7 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool/legacypool"
-	"github.com/ethereum/go-ethereum/eth/downloader"
+	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/obsidian-chain/obsidian/params"
 )
@@ -21,7 +21,7 @@ type FullnodeConfig struct {
 	Genesis   *params.ObsidianashConfig
 
 	// Sync mode settings
-	SyncMode downloader.SyncMode
+	SyncMode ethconfig.SyncMode
 
 	// Database options
 	DatabaseHandles int
@@ -70,7 +70,7 @@ type MinerConfig struct {
 func DefaultConfig() *FullnodeConfig {
 	return &FullnodeConfig{
 		NetworkId:       params.ObsidianMainnetChainConfig.ChainID.Uint64(),
-		SyncMode:        downloader.SnapSync,
+		SyncMode:        ethconfig.SnapSync,
 		DatabaseHandles: 512,
 		DatabaseCache:   256,
 		TrieTimeout:     60 * time.Minute,

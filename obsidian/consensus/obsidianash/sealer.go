@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash"
-	"math"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -21,7 +20,6 @@ import (
 )
 
 var (
-	errNoMiningWork = errors.New("no mining work available")
 )
 
 // hashrate tracks the mining hashrate
@@ -305,6 +303,3 @@ func (o *ObsidianAsh) MineBlock(chain consensus.ChainHeaderReader, block *types.
 }
 
 // randomNonce generates a random starting nonce
-func randomNonce() uint64 {
-	return rand.Uint64()&math.MaxInt64 + rand.Uint64()&math.MaxInt64
-}

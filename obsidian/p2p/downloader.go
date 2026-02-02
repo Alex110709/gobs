@@ -67,12 +67,6 @@ type Downloader struct {
 }
 
 type syncRequest struct {
-	peer      *Peer
-	from      uint64
-	count     uint64
-	startTime time.Time
-	done      chan struct{}
-	err       error
 }
 
 type headerResponse struct {

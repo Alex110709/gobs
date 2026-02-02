@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -183,7 +184,7 @@ func (m *Manager) Delete(filename string) error {
 	backupPath := filepath.Join(m.backupDir, filename)
 
 	// Safety check - only allow deletion from backup directory
-	if !filepath.HasPrefix(backupPath, m.backupDir) {
+	if !strings.HasPrefix(backupPath, m.backupDir) {
 		return fmt.Errorf("invalid backup path")
 	}
 

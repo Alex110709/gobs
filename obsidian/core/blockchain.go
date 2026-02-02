@@ -57,9 +57,7 @@ type BlockChain struct {
 
 	// Feeds
 	chainHeadFeed event.Feed
-	chainSideFeed event.Feed
 	logsFeed      event.Feed
-	rmLogsFeed    event.Feed
 	scope         event.SubscriptionScope
 
 	// Mutex
@@ -661,7 +659,7 @@ func (bc *BlockChain) applyTransaction(tx *obstypes.StealthTransaction, state *o
 
 	// Execute transaction
 	var (
-		gas     = tx.Gas()
+		gas     uint64
 		failed  = false
 		logs    []*obstypes.Log
 	)

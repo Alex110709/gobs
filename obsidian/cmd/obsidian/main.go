@@ -270,6 +270,17 @@ func runNode(ctx *cli.Context) error {
 
 	// Start mining if enabled
 	if ctx.Bool(minerEnabledFlag.Name) {
+		// Set miner etherbase if provided
+		if coinbase := ctx.String(minerCoinbaseFlag.Name); coinbase != "" {
+			if !common.IsHexAddress(coinbase) {
+				return fmt.Errorf("invalid miner.etherbase address: %s", coinbase)
+			}
+			if err := b.SetCoinbase(common.HexToAddress(coinbase)); err != nil {
+				return fmt.Errorf("failed to set coinbase: %v", err)
+			}
+			log.Info("Miner etherbase configured", "address", coinbase)
+		}
+
 		log.Info("Starting miner (with delay to ensure P2P connectivity)")
 		go func() {
 			// Wait for peer discovery and connections

@@ -222,3 +222,9 @@ func (f *ViewTagFilter) DeriveAddress(ephemeralPubKey []byte, expectedAddr commo
 
 	return true, nil, nil
 }
+
+// DeriveStealthAddressFromSharedSecret derives a stealth address from a shared secret
+func DeriveStealthAddressFromSharedSecret(spendPubKey *ecdsa.PublicKey, sharedSecret []byte) common.Address {
+	stealthPubKey := DeriveStealthPublicKey(spendPubKey, sharedSecret)
+	return PublicKeyToAddress(stealthPubKey)
+}

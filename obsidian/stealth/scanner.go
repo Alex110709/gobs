@@ -267,3 +267,4 @@ func (bs *BlockScanner) GetTotalBalance() *big.Int {
 	return bs.scanner.TotalBalance()
 }
 
+

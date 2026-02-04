@@ -351,9 +351,47 @@ func (h *Handler) runPeer(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 
 	// Start peer goroutines
 	go h.broadcastLoop(peer)
+	go h.statusLoop(peer)
 
 	// Handle messages
 	return h.handlePeer(peer)
+}
+
+// statusLoop periodically sends our status to the peer
+func (h *Handler) statusLoop(p *Peer) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := h.sendStatus(p); err != nil {
+				return
+			}
+		case <-p.term:
+			return
+		}
+	}
+}
+
+// sendStatus sends our current status to a peer
+func (h *Handler) sendStatus(p *Peer) error {
+	head := h.backend.CurrentBlock()
+	td := h.backend.GetTD(head.Hash())
+	if td == nil {
+		td = big.NewInt(0)
+	}
+
+	status := StatusPacket{
+		ProtocolVersion: ProtocolVersion,
+		NetworkID:       h.networkID,
+		TD:              td,
+		HeadHash:        head.Hash(),
+		HeadNumber:      head.Number.Uint64(),
+		GenesisHash:     h.genesisHash,
+	}
+
+	return p2p.Send(p.rw, StatusMsg, &status)
 }
 
 // handshake performs the protocol handshake
@@ -495,8 +533,23 @@ func (h *Handler) handlePeer(p *Peer) error {
 
 		switch msg.Code {
 		case StatusMsg:
-			// Already handled in handshake
-			_ = msg.Discard()
+			var status StatusPacket
+			if err := msg.Decode(&status); err != nil {
+				return err
+			}
+			p.lock.Lock()
+			if status.TD != nil && (p.td == nil || status.TD.Cmp(p.td) > 0) {
+				p.head = status.HeadHash
+				p.td = status.TD
+				p.number = status.HeadNumber
+				log.Debug("Peer updated status", "peer", p.id[:16], "head", p.number, "td", p.td)
+			}
+			p.lock.Unlock()
+
+			// Trigger sync check if needed
+			if h.downloader != nil {
+				go h.downloader.CheckAndSync()
+			}
 
 		case NewBlockHashesMsg:
 			if err := h.handleNewBlockHashes(p, msg); err != nil {
@@ -567,6 +620,13 @@ func (h *Handler) handleNewBlockHashes(p *Peer, msg p2p.Msg) error {
 
 	for _, announce := range announces {
 		p.knownBlocks.Add(announce.Hash)
+
+		p.lock.Lock()
+		if announce.Number > p.number {
+			p.head = announce.Hash
+			p.number = announce.Number
+		}
+		p.lock.Unlock()
 
 		if !h.backend.HasBlock(announce.Hash) {
 			log.Debug("New block hash announced",

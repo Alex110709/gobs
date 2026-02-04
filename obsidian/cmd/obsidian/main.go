@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -24,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	ethrpc "github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/urfave/cli/v2"
 
 	"github.com/obsidian-chain/obsidian/accounts/keystore"
@@ -199,11 +199,19 @@ func runNode(ctx *cli.Context) error {
 	)
 
 	// Parse seed nodes
-	seedNodes := strings.Split(ctx.String(bootnodesFlag.Name), ",")
-	for i := range seedNodes {
-		seedNodes[i] = strings.TrimSpace(seedNodes[i])
+	bootnodes := ctx.String(bootnodesFlag.Name)
+	var nodes []*enode.Node
+	for _, url := range strings.Split(bootnodes, ",") {
+		if url = strings.TrimSpace(url); url == "" {
+			continue
+		}
+		node, err := enode.Parse(enode.ValidSchemes, url)
+		if err != nil {
+			log.Error("Invalid bootstrap node URL", "url", url, "err", err)
+			continue
+		}
+		nodes = append(nodes, node)
 	}
-	log.Info("Seed nodes configured", "nodes", seedNodes)
 
 	// Create node config
 	nodeConfig := node.DefaultConfig()
@@ -216,6 +224,8 @@ func runNode(ctx *cli.Context) error {
 	nodeConfig.P2P.MaxPeers = ctx.Int(maxPeersFlag.Name)
 	nodeConfig.P2P.ListenAddr = fmt.Sprintf(":%d", ctx.Int(p2pPortFlag.Name))
 	nodeConfig.P2P.NoDiscovery = ctx.Bool(noDiscoverFlag.Name)
+	nodeConfig.P2P.BootstrapNodes = nodes
+	nodeConfig.P2P.StaticNodes = nodes // Treat initial bootnodes as static for stability
 
 	// Create node
 	n, err := node.New(&nodeConfig)
@@ -276,7 +286,7 @@ func runNode(ctx *cli.Context) error {
 	)
 
 	// Connect to seed nodes in background
-	go connectToSeedNodes(seedNodes)
+	go maintainP2PConnections(n, nodes)
 
 	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
@@ -633,30 +643,32 @@ var nodeCommand = &cli.Command{
 	},
 }
 
-// connectToSeedNodes attempts to connect to seed nodes
-func connectToSeedNodes(seedNodes []string) {
-	log.Info("Connecting to seed nodes...", "count", len(seedNodes))
+// maintainP2PConnections periodically ensures connectivity to seed nodes
+func maintainP2PConnections(n *node.Node, seedNodes []*enode.Node) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
-	for _, addr := range seedNodes {
-		if addr == "" {
-			continue
+	// Initial connection
+	dialPeers(n, seedNodes)
+
+	for {
+		select {
+		case <-ticker.C:
+			dialPeers(n, seedNodes)
 		}
+	}
+}
 
-		go func(nodeAddr string) {
-			// Retry connection with backoff
-			for i := 0; i < 3; i++ {
-				conn, err := net.DialTimeout("tcp", nodeAddr, 10*time.Second)
-				if err != nil {
-					log.Debug("Failed to connect to seed node", "addr", nodeAddr, "attempt", i+1, "error", err)
-					time.Sleep(time.Duration(i+1) * 5 * time.Second)
-					continue
-				}
-				conn.Close()
-				log.Info("Successfully connected to seed node", "addr", nodeAddr)
-				return
-			}
-			log.Warn("Could not connect to seed node after retries", "addr", nodeAddr)
-		}(addr)
+func dialPeers(n *node.Node, nodes []*enode.Node) {
+	srv := n.Server()
+	if srv == nil {
+		return
+	}
+
+	for _, node := range nodes {
+		// Only dial if not already connected
+		srv.AddPeer(node)
+		log.Debug("Ensuring connectivity to seed node", "enode", node.String())
 	}
 }
 

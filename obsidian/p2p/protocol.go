@@ -459,12 +459,17 @@ func (h *Handler) handshake(p *Peer) error {
 	if peerStatus.GenesisHash != h.genesisHash {
 		return fmt.Errorf("genesis mismatch: %s vs %s", peerStatus.GenesisHash.Hex()[:16], h.genesisHash.Hex()[:16])
 	}
+	if peerStatus.HeadNumber > 0 && peerStatus.HeadHash == (common.Hash{}) {
+		return fmt.Errorf("invalid head hash for block %d", peerStatus.HeadNumber)
+	}
 
 	// Update peer state
+	p.lock.Lock()
 	p.version = peerStatus.ProtocolVersion
 	p.head = peerStatus.HeadHash
 	p.td = peerStatus.TD
 	p.number = peerStatus.HeadNumber
+	p.lock.Unlock()
 
 	log.Info("Peer handshake completed",
 		"peer", p.id[:16],
@@ -959,19 +964,26 @@ func (h *Handler) BroadcastBlock(block *obstypes.ObsidianBlock) {
 	}
 
 	// Broadcast to all peers that don't know this block
+	// We use a small worker pool or immediate dispatch but ensure we don't block
 	var sent int
 	for _, p := range peers {
-		// Send directly instead of queuing for immediate delivery
-		go func(peer *Peer) {
-			if err := h.sendNewBlock(peer, block); err != nil {
-				log.Debug("Failed to broadcast block to peer",
-					"peer", peer.id[:16],
-					"block", block.NumberU64(),
-					"err", err,
-				)
-			}
-		}(p)
-		sent++
+		p.knownBlocks.Add(hash) // Mark as known before sending to prevent duplicates
+		select {
+		case p.queuedBlocks <- block:
+			sent++
+		default:
+			// Queue full, send in background to not block the broadcaster
+			go func(peer *Peer, b *obstypes.ObsidianBlock) {
+				if err := h.sendNewBlock(peer, b); err != nil {
+					log.Debug("Failed to broadcast block to peer",
+						"peer", peer.id[:16],
+						"block", b.NumberU64(),
+						"err", err,
+					)
+				}
+			}(p, block)
+			sent++
+		}
 	}
 
 	log.Info("Block broadcast initiated",

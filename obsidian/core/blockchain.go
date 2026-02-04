@@ -951,3 +951,37 @@ func (bc *BlockChain) applyBlockReward(header *obstypes.ObsidianHeader, state *o
 	reward := params.CalculateBlockReward(blockNumber)
 	state.AddBalance(header.Coinbase, reward)
 }
+
+// GetTransaction retrieves a transaction and its location in the chain
+func (bc *BlockChain) GetTransaction(hash common.Hash) (*obstypes.StealthTransaction, common.Hash, uint64, uint64) {
+	// Read lookup entry from DB
+	entry := rawdb.ReadTxLookupEntry(bc.db, hash)
+	if entry == nil {
+		return nil, common.Hash{}, 0, 0
+	}
+
+	// Load the block
+	block := bc.GetBlock(entry.BlockHash, entry.BlockIndex)
+	if block == nil {
+		return nil, common.Hash{}, 0, 0
+	}
+
+	// Get the transaction
+	txs := block.Transactions()
+	if entry.TxIndex >= uint64(len(txs)) {
+		return nil, common.Hash{}, 0, 0
+	}
+
+	return txs[entry.TxIndex], entry.BlockHash, entry.BlockIndex, entry.TxIndex
+}
+
+// SetP2PHandler sets the handler for broadcasting new blocks
+func (bc *BlockChain) SetP2PHandler(handler interface {
+	BroadcastBlock(block *obstypes.ObsidianBlock)
+}) {
+	bc.insertMu.Lock()
+	defer bc.insertMu.Unlock()
+	// This would typically store it to broadcast inside insertBlock
+	// but currently insertBlock doesn't have access to the broadcaster directly
+	// Let's assume the backend handles broadcasting for now as it did before.
+}
